@@ -1,0 +1,11 @@
+# 배포에 불필요하거나 공개하면 안 되는 것 (교재 저작권·대용량)
+imsang/
+_reference/
+_plan/
+
+# 임시/시스템 파일
+~$*
+*.tmp
+.DS_Store
+desktop.ini
+Thumbs.db
