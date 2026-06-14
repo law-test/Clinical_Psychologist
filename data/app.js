@@ -49,6 +49,7 @@ function mdToHtml(md){
     const l=raw.trim();
     if(l.startsWith("|")&&l.endsWith("|")){ cu(); const cells=l.slice(1,-1).split("|").map(x=>x.trim()); if(cells.every(c=>/^:?-+:?$/.test(c)))continue; (tb=tb||[]).push(cells); continue; } else ct();
     if(l===""){cu();continue;}
+    if(l.startsWith("![")){const m=l.match(/^!\[([^\]]*)\]\((https?:\/\/.+)\)\s*$/);if(m){cu();h+=`<figure class="port"><img src="${m[2]}" alt="${esc(m[1])}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.port').style.display='none'"><figcaption>${esc(m[1])}</figcaption></figure>`;continue;}}
     if(l.startsWith("### ")){cu();h+="<h3>"+inl(l.slice(4))+"</h3>";}
     else if(l.startsWith("## ")){cu();h+="<h2>"+inl(l.slice(3))+"</h2>";}
     else if(l.startsWith("> ")){cu();h+="<blockquote>"+inl(l.slice(2))+"</blockquote>";}
