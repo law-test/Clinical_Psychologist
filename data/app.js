@@ -107,6 +107,58 @@ function renderDrill(text,g){
 }
 function updateDrill(g){ const b=$("#drillBox"); if(b){b.innerHTML=renderDrill(curAns,+g);} const gv=$("#gv"); if(gv)gv.textContent=g; const r=$("#gauge"); if(r&&+r.value!==+g)r.value=g; }
 function setGauge(g){ updateDrill(g); }
+// ---------- 서술형 키워드 타이핑 게임 (한 줄씩) ----------
+let GD={lines:[],li:0,cut:1,box:"",text:"",done:false,msg:"",ok:null};
+function gdParse(text){
+  return text.split("\n").map(line=>{
+    const segs=[],chunks=[];
+    line.split(/(\*[^*]+\*)/).forEach(p=>{
+      if(p==="") return;
+      if(p.length>2&&p[0]==="*"&&p[p.length-1]==="*"){
+        p.slice(1,-1).split("·").forEach((c,idx)=>{ if(idx>0)segs.push({t:"fix",w:"·"}); segs.push({t:"chunk",w:c,bi:chunks.length}); chunks.push(c); });
+      } else segs.push({t:"fix",w:p});
+    });
+    const head=/^(\[|※)/.test(line.trim());
+    return {segs,chunks,head,drillable:chunks.length>0&&!head};
+  });
+}
+function gdNorm(s){ return (s||"").replace(/[\s·,.\/()\[\]:;'"]/g,"").toLowerCase(); }
+function gdNextLine(from){ for(let i=from;i<GD.lines.length;i++) if(GD.lines[i].drillable) return i; return -1; }
+function gdInit(text,box){ GD.text=text; GD.box=box; GD.lines=gdParse(text); GD.done=false; GD.msg=""; GD.ok=null; GD.cut=1; GD.li=gdNextLine(0); if(GD.li<0)GD.li=0; gdRender(); }
+function gdRestart(){ gdInit(GD.text,GD.box); }
+function gdLineHTML(line,cut){ return line.segs.map(s=>{ if(s.t==="fix") return esc(s.w); if(cut>=0&&s.bi<cut) return '<span class="gd-blank">(&nbsp;&nbsp;&nbsp;)</span>'; return '<b>'+esc(s.w)+'</b>'; }).join(""); }
+function gdNeed(){ return GD.lines[GD.li].chunks.slice(0,GD.cut); }
+function gdRender(){
+  const b=$(GD.box); if(!b) return;
+  const total=GD.lines.filter(l=>l.drillable).length;
+  const doneN=GD.lines.slice(0,GD.li).filter(l=>l.drillable).length;
+  let h="";
+  GD.lines.forEach((line,i)=>{
+    if(!line.segs.length){ h+='<div class="ln"></div>'; return; }
+    if(GD.done||!line.drillable||i!==GD.li){ h+=`<div class="ln${line.head?' h':''}">${gdLineHTML(line,-1)}</div>`; return; }
+    h+=`<div class="ln cur">${gdLineHTML(line,GD.cut)}</div>`;
+  });
+  if(!GD.done){
+    const N=GD.lines[GD.li].chunks.length;
+    h+=`<div class="gd-ctl"><span class="ld-prog">줄 ${doneN+1}/${total} · 키워드 칸 ${GD.cut}/${N}</span>`
+      +`<input type="text" id="gdInput" class="gd-input" placeholder="빈칸의 단어를 입력 (여러 개면 띄어쓰기/쉼표)" autocomplete="off">`
+      +`<button class="btn" onclick="gdCheck()">확인</button>`
+      +`<button class="db" onclick="gdReveal()">정답 보기</button></div>`
+      +`<div class="gd-fb${GD.ok===false?' bad':(GD.ok?' good':'')}" id="gdFb">${esc(GD.msg)}</div>`;
+  } else h+=`<div class="ld-final">🎉 이 답안의 핵심어를 모두 맞혔습니다! <button class="db" onclick="gdRestart()">다시 하기</button></div>`;
+  b.innerHTML=h;
+  const inp=$("#gdInput"); if(inp){ try{inp.focus();}catch(e){} inp.onkeydown=function(e){ if(e.key==="Enter")gdCheck(); }; }
+}
+function gdStep(){ const line=GD.lines[GD.li]; if(GD.cut<line.chunks.length){GD.cut++;} else {const nx=gdNextLine(GD.li+1); if(nx<0)GD.done=true; else {GD.li=nx;GD.cut=1;}} }
+function gdCheck(){
+  const inp=$("#gdInput"); if(!inp) return;
+  const need=gdNeed(), got=gdNorm(inp.value);
+  if(got && need.every(c=>got.includes(gdNorm(c)))){
+    const last=GD.cut>=GD.lines[GD.li].chunks.length; gdStep(); GD.ok=true;
+    GD.msg=GD.done?"":(last?"✓ 이 줄 완성! 다음 줄로.":"✓ 정답! 다음 칸을 채워 보세요."); gdRender();
+  } else { GD.ok=false; const fb=$("#gdFb"); if(fb){ fb.textContent="✗ 아쉬워요. 빈칸의 단어를 다시 입력해 보세요."; fb.className="gd-fb bad"; } }
+}
+function gdReveal(){ GD.msg="정답: "+gdNeed().join(" , "); GD.ok=null; gdStep(); gdRender(); }
 // ---------- 문항 상세 ----------
 function showQ(id,skip){
   MODE="study"; const q=byId[id]; if(!q) return; CUR=id; curAns=q.a;
@@ -130,16 +182,11 @@ function showQ(id,skip){
    ${q.hook? ('<div class="sect">🧠 외우기 고리</div><div class="hook">'+esc(q.hook).replace(/\*([^*]+)\*/g,'<b>$1</b>')+'</div>') : ''}
    <div class="sect">📌 핵심어 (필수 기재)</div><div class="kw">${kw}</div>
    <div class="sect">✍️ 시험용 답안</div><div class="ans">${fmtAns(q.a)}</div>
-   <div class="sect">📝 서술형 빈칸 암기 <span class="dnote">가리기 <span id="gv">45</span>% · 빈칸 클릭하면 정답</span></div>
-   <div class="drill-ctl">
-     <button class="db" onclick="setGauge(0)">전체 보기</button>
-     <input type="range" id="gauge" min="0" max="100" value="45" step="5" oninput="updateDrill(this.value)">
-     <button class="db" onclick="setGauge(100)">완성(다 가리기)</button>
-   </div>
+   <div class="sect">📝 서술형 빈칸 암기 (게임) <span class="dnote">한 줄씩 · 빈칸의 단어를 입력해 맞히기</span></div>
    <div class="ans drill" id="drillBox"></div>
    <div class="sect">🗓️ 출제 회차 (${q.ses.length}회)</div><div class="note">${esc(q.ses.join(" · "))}</div>
    <div class="note" style="margin-top:16px">※ 핵심어(<b style="color:var(--hl)">빨강</b>)는 채점 시 반드시 들어가야 하는 단어입니다.</div>`;
-  updateDrill(45);
+  gdInit(curAns,"#drillBox");
   try{window.scrollTo(0,0);}catch(e){}
   if(window.innerWidth<=860) nav.classList.remove('open');
 }
@@ -181,22 +228,19 @@ function drillSetup(skip){
     <h2>📝 서술형 빈칸 암기</h2>
     <p style="color:var(--txt2);margin-bottom:8px">단원을 골라 문항을 차례로 보며 답안을 가리고 떠올려 보세요. 빈칸을 클릭하면 정답이 나옵니다.</p>
     <div class="ox-row"><label>범위</label><select id="d-scope">${opts}</select></div>
-    <div class="ox-row"><label>가리기</label>
-      <select id="d-g"><option value="45">핵심어 위주(45%)</option><option value="25">조금(25%)</option><option value="70">많이(70%)</option><option value="100">완성(100%)</option></select>
-      <label style="min-width:auto;margin-left:8px"><input type="checkbox" id="d-shuf"> 순서 섞기</label>
-    </div>
+    <div class="ox-row"><label>순서</label><label style="min-width:auto"><input type="checkbox" id="d-shuf"> 섞기</label></div>
     <div class="ox-row"><button class="btn" onclick="drillStart()">시작</button></div>
   </div></div>`;
 }
 function drillStart(){
-  const scope=$("#d-scope").value, g=+$("#d-g").value, shuf=$("#d-shuf").checked;
+  const scope=$("#d-scope").value, shuf=$("#d-shuf").checked;
   let pool=Q.slice();
   if(scope.startsWith("area:")) pool=pool.filter(q=>q.sub[0]===scope.slice(5));
   else if(scope.startsWith("sub:")) pool=pool.filter(q=>q.sub===scope.slice(4));
   pool.sort((a,b)=>a.rank-b.rank);
   if(shuf) for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
   if(!pool.length){alert("문항이 없습니다.");return;}
-  dq={pool,i:0,g}; drillCard();
+  dq={pool,i:0}; drillCard();
 }
 function drillCard(){
   const q=dq.pool[dq.i];
@@ -206,19 +250,14 @@ function drillCard(){
    <div class="crumb">${esc(q.area)} › ${esc(q.st)}</div>
    <h1 style="font-size:18px;border-left:5px solid var(--accent);padding-left:12px">${esc(q.q)}</h1>
    ${q.cs? ('<div class="qbox" style="margin-top:8px">'+esc(q.cs).replace(/\n/g,'<br>')+'</div>') : ''}
-   <div class="sect">📝 답안 빈칸 <span class="dnote">가리기 <span id="gv2">${dq.g}</span>% · 빈칸 클릭 = 정답</span></div>
-   <div class="drill-ctl">
-     <button class="db" onclick="setGauge2(0)">전체 보기</button>
-     <input type="range" id="gauge2" min="0" max="100" value="${dq.g}" step="5" oninput="setGauge2(this.value)">
-     <button class="db" onclick="setGauge2(100)">완성</button>
-   </div>
+   <div class="sect">📝 답안 빈칸 암기 (게임) <span class="dnote">한 줄씩 · 빈칸의 단어를 입력해 맞히기</span></div>
    <div class="ans drill" id="drillBox2"></div>
    <div style="display:flex;justify-content:space-between;margin-top:18px">
      <button class="btn ghost" onclick="drillPrev()" ${dq.i===0?'disabled':''}>← 이전</button>
      <button class="btn ghost" onclick="showQ('${q.id}')">상세 보기</button>
      <button class="btn" onclick="drillNext()">${dq.i+1>=dq.pool.length?'끝':'다음 →'}</button>
    </div></div>`;
-  setGauge2(dq.g);
+  gdInit(dq.pool[dq.i].a,"#drillBox2");
 }
 function setGauge2(g){ const b=$("#drillBox2"); if(b)b.innerHTML=renderDrill(dq.pool[dq.i].a,+g); const v=$("#gv2"); if(v)v.textContent=g; const r=$("#gauge2"); if(r&&+r.value!==+g)r.value=g; }
 function drillNext(){ if(dq.i+1>=dq.pool.length){drillSetup();return;} dq.i++; drillCard(); }
