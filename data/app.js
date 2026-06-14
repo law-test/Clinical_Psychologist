@@ -108,65 +108,102 @@ function renderDrill(text,g){
 function updateDrill(g){ const b=$("#drillBox"); if(b){b.innerHTML=renderDrill(curAns,+g);} const gv=$("#gv"); if(gv)gv.textContent=g; const r=$("#gauge"); if(r&&+r.value!==+g)r.value=g; }
 function setGauge(g){ updateDrill(g); }
 // ---------- 서술형 키워드 타이핑 게임 (한 줄씩) ----------
-let GD={lines:[],li:0,cut:0,box:"",text:"",done:false,msg:"",ok:null,intro:true};
+let GD={lines:[],box:"",text:"",_q:"",phase:"intro",li:0,cut:0,active:[],rorder:[],rsteps:[],ri:0,msg:"",ok:null};
+function gdNorm(s){ return (s||"").replace(/[\s·,.\/()\[\]:;'"]/g,"").toLowerCase(); }
 function gdParse(text){
+  const kwSet=new Set();
+  (text.match(/\*[^*]+\*/g)||[]).forEach(m=>m.slice(1,-1).split(/[\s·]+/).forEach(w=>{if(w)kwSet.add(w);}));
+  let gid=0;
   return text.split("\n").map(line=>{
-    const segs=[],chunks=[];
-    line.split(/(\*[^*]+\*)/).forEach(p=>{
+    const plain=line.replace(/\*/g,""); const segs=[],order=[];
+    plain.split(/(\s+|·)/).forEach(p=>{
       if(p==="") return;
-      if(p.length>2&&p[0]==="*"&&p[p.length-1]==="*"){
-        p.slice(1,-1).split("·").forEach((c,idx)=>{ if(idx>0)segs.push({t:"fix",w:"·"}); segs.push({t:"chunk",w:c,bi:chunks.length}); chunks.push(c); });
-      } else segs.push({t:"fix",w:p});
+      if(/^\s+$/.test(p)){ segs.push({t:"sp",w:p}); return; }
+      if(p==="·"){ segs.push({t:"fix",w:p}); return; }
+      const marker=/^[①-⑳]+$|^\(\d+\)$|^[-:;,.()\[\]]+$/.test(p);
+      if(/[가-힣A-Za-z0-9]/.test(p)&&!marker){ const kw=kwSet.has(p),id=gid++; segs.push({t:"word",w:p,kw,id}); order.push({id,kw,w:p}); }
+      else segs.push({t:"fix",w:p});
     });
-    const head=/^(\[|※)/.test(line.trim());
-    return {segs,chunks,head,drillable:chunks.length>0&&!head};
+    const head=/^(\[|※)/.test(plain.trim());
+    const bo=order.map((o,i)=>({id:o.id,kw:o.kw,w:o.w,pos:i})).sort((a,b)=>((a.kw?0:1)-(b.kw?0:1))||(a.pos-b.pos));
+    return {segs,order,blankOrder:bo,head,drillable:order.length>0&&!head};
   });
 }
-function gdNorm(s){ return (s||"").replace(/[\s·,.\/()\[\]:;'"]/g,"").toLowerCase(); }
-function gdNextLine(from){ for(let i=from;i<GD.lines.length;i++) if(GD.lines[i].drillable) return i; return -1; }
-function gdInit(text,box){ GD.text=text; GD.box=box; GD.lines=gdParse(text); GD.done=false; GD.intro=true; GD.msg=""; GD.ok=null; GD.cut=0; GD.li=gdNextLine(0); if(GD.li<0)GD.li=0; gdRender(); }
-function gdRestart(){ gdInit(GD.text,GD.box); }
-function gdBegin(){ GD.intro=false; GD.cut=0; GD.msg=""; GD.ok=null; gdRender(); }
-function gdLineFull(line){ return line.segs.map(s=>s.t==="fix"?esc(s.w):'<b>'+esc(s.w)+'</b>').join(""); }
-function gdLineHTML(line,cut){ return line.segs.map(s=>{ if(s.t==="fix") return esc(s.w); if(cut>=1&&s.bi<cut) return '<span class="gd-blank">(&nbsp;&nbsp;&nbsp;)</span>'; return '<b>'+esc(s.w)+'</b>'; }).join(""); }
-function gdNeed(){ const c=GD.lines[GD.li].chunks; return GD.cut<=0? c.slice() : c.slice(0,GD.cut); }
+function gdInit(text,box,qtext){
+  GD.text=text; GD.box=box; GD._q=qtext||""; GD.lines=gdParse(text); GD.phase="intro"; GD.li=0; GD.cut=0; GD.ri=0; GD.msg=""; GD.ok=null;
+  let limit=999; const m=GD._q.match(/(\d+)\s*가지/); const dr=GD.lines.filter(l=>l.drillable).length;
+  if(m && !/각|씩/.test(GD._q) && dr>+m[1]) limit=+m[1];
+  GD.active=[]; let c=0;
+  GD.lines.forEach((l)=>{ l.extra=false; if(l.drillable){ if(c<limit)GD.active.push(GD.lines.indexOf(l)); else l.extra=true; c++; } });
+  const ids=[]; GD.active.forEach(i=>GD.lines[i].order.forEach(o=>ids.push({li:i,id:o.id})));
+  for(let k=ids.length-1;k>0;k--){const j=Math.floor(Math.random()*(k+1));[ids[k],ids[j]]=[ids[j],ids[k]];}
+  GD.rorder=ids; const tot=ids.length; GD.rsteps=[];
+  [0.25,0.5,0.75,1].forEach(f=>{const v=Math.max(1,Math.round(tot*f)); if(!GD.rsteps.includes(v))GD.rsteps.push(v);});
+  gdRender();
+}
+function gdRestart(){ gdInit(GD.text,GD.box,GD._q); }
+function gdBegin(){ GD.phase="line"; GD.li=GD.active[0]; GD.cut=0; GD.msg=""; GD.ok=null; gdRender(); }
+function gdBlankedSet(){
+  const s=new Set();
+  if(GD.phase==="line"){ const bo=GD.lines[GD.li].blankOrder; for(let k=0;k<GD.cut&&k<bo.length;k++)s.add(bo[k].id); }
+  else if(GD.phase==="random"){ const n=GD.rsteps[GD.ri]; for(let k=0;k<n&&k<GD.rorder.length;k++)s.add(GD.rorder[k].id); }
+  return s;
+}
+function gdNeed(){
+  const words=[];
+  if(GD.phase==="line"){ const ln=GD.lines[GD.li]; if(GD.cut===0) return ln.order.map(o=>o.w); const bl=gdBlankedSet(); ln.order.forEach(o=>{if(bl.has(o.id))words.push(o.w);}); }
+  else if(GD.phase==="random"){ const bl=gdBlankedSet(); GD.active.forEach(i=>GD.lines[i].order.forEach(o=>{if(bl.has(o.id))words.push(o.w);})); }
+  return words;
+}
+function gdFull(line){ return line.segs.map(s=> s.t==="sp"?s.w : (s.t==="word"?(s.kw?'<b>'+esc(s.w)+'</b>':esc(s.w)) : esc(s.w))).join(""); }
+function gdWordHTML(line,bl){ return line.segs.map(s=> s.t==="sp"?s.w : (s.t==="word"?(bl.has(s.id)?'<span class="gd-blank">(&nbsp;&nbsp;)</span>':(s.kw?'<b>'+esc(s.w)+'</b>':esc(s.w))) : esc(s.w))).join(""); }
 function gdRender(){
   const b=$(GD.box); if(!b) return;
+  const bl=gdBlankedSet();
   let body="";
   GD.lines.forEach((line,i)=>{
+    if(line.extra) return;
     if(!line.segs.length){ body+='<div class="ln"></div>'; return; }
-    if(GD.intro||GD.done||!line.drillable||i!==GD.li){ body+=`<div class="ln${line.head?' h':''}">${gdLineFull(line)}</div>`; return; }
-    body+=`<div class="ln cur">${gdLineHTML(line,GD.cut)}</div>`;
+    const isCur=(GD.phase==="line"&&i===GD.li);
+    const useBlank=isCur||(GD.phase==="random"&&GD.active.indexOf(i)>=0);
+    body+=`<div class="ln${line.head?" h":""}${isCur?" cur":""}">${useBlank?gdWordHTML(line,bl):gdFull(line)}</div>`;
   });
   let ctl="";
-  if(GD.intro){
+  if(GD.phase==="intro"){
     ctl=`<div class="gd-ctl"><span class="ld-prog">먼저 문제와 답 전체를 천천히 읽어 보세요.</span><button class="btn" onclick="gdBegin()">암기 시작 ▶</button></div>`;
-  } else if(GD.done){
-    ctl=`<div class="ld-final">🎉 이 답안의 핵심어를 모두 맞혔습니다! <button class="db" onclick="gdRestart()">다시 하기</button></div>`;
+  } else if(GD.phase==="done"){
+    ctl=`<div class="ld-final">🎉 전체를 다 외웠습니다! <button class="db" onclick="gdRestart()">다시 하기</button></div>`;
   } else {
-    const N=GD.lines[GD.li].chunks.length;
-    const prog=GD.cut<=0? "이 줄을 보고 그대로 한 번 입력" : `빈칸 ${GD.cut}/${N}`;
-    const ph=GD.cut<=0? "이 줄의 키워드를 그대로 입력해 보세요" : "빈칸의 단어 입력 (여러 개면 띄어쓰기/쉼표)";
+    let prog;
+    if(GD.phase==="line"){ const M=GD.lines[GD.li].blankOrder.length, ai=GD.active.indexOf(GD.li)+1; prog=GD.cut===0?`줄 ${ai}/${GD.active.length} · 전체 보고 입력`:`줄 ${ai}/${GD.active.length} · 빈칸 ${GD.cut}/${M}`; }
+    else { prog=`전체 랜덤 암기 · 빈칸 ${GD.rsteps[GD.ri]}/${GD.rorder.length}`; }
+    const ph=(GD.phase==="line"&&GD.cut===0)?"이 줄을 그대로 한 번 입력":"빈칸의 단어를 모두 입력 (띄어쓰기/쉼표)";
+    const skip=(GD.phase==="line"&&GD.cut===0)?"건너뛰기":"정답 보기";
     ctl=`<div class="gd-ctl"><span class="ld-prog">${prog}</span>`
       +`<input type="text" id="gdInput" class="gd-input" placeholder="${ph}" autocomplete="off">`
-      +`<button class="btn" onclick="gdCheck()">확인</button>`
-      +`<button class="db" onclick="gdReveal()">${GD.cut<=0?"건너뛰기":"정답 보기"}</button></div>`
+      +`<button class="btn" onclick="gdCheck()">확인</button><button class="db" onclick="gdReveal()">${skip}</button></div>`
       +`<div class="gd-fb${GD.ok===false?" bad":(GD.ok?" good":"")}" id="gdFb">${esc(GD.msg)}</div>`;
   }
   b.innerHTML=body+ctl;
   const inp=$("#gdInput"); if(inp){ try{inp.focus();}catch(e){} inp.onkeydown=function(e){ if(e.key==="Enter")gdCheck(); }; }
 }
-function gdStep(){ const N=GD.lines[GD.li].chunks.length; if(GD.cut<N){GD.cut++;} else {const nx=gdNextLine(GD.li+1); if(nx<0)GD.done=true; else {GD.li=nx;GD.cut=0;}} }
+function gdStep(){
+  if(GD.phase==="line"){
+    const M=GD.lines[GD.li].blankOrder.length;
+    if(GD.cut<M){ GD.cut++; }
+    else { const ai=GD.active.indexOf(GD.li); if(ai+1<GD.active.length){ GD.li=GD.active[ai+1]; GD.cut=0; } else { GD.phase=GD.rorder.length?"random":"done"; GD.ri=0; } }
+  } else if(GD.phase==="random"){ if(GD.ri+1<GD.rsteps.length){ GD.ri++; } else { GD.phase="done"; } }
+}
 function gdCheck(){
   const inp=$("#gdInput"); if(!inp) return;
-  const need=gdNeed(), got=gdNorm(inp.value), wasT=GD.cut<=0, last=GD.cut>=GD.lines[GD.li].chunks.length;
+  const need=gdNeed(), got=gdNorm(inp.value), pp=GD.phase;
   if(got && need.every(c=>got.includes(gdNorm(c)))){
     gdStep(); GD.ok=true;
-    GD.msg=GD.done?"":(wasT?"✓ 좋아요! 이제 빈칸을 하나씩 채워 보세요.":(last?"✓ 이 줄 완성! 다음 줄로.":"✓ 정답! 다음 칸을 채워 보세요."));
+    GD.msg = GD.phase==="done" ? "" : (pp==="line"&&GD.phase==="random" ? "✓ 줄별 암기 완료! 이제 줄 상관없이 전체를 외워요." : (GD.phase==="random" ? "✓ 정답! 빈칸을 더 늘립니다." : (GD.cut===0 ? "✓ 이 줄 완성! 다음 줄로." : "✓ 정답! 계속 입력하세요.")));
     gdRender();
-  } else { GD.ok=false; const fb=$("#gdFb"); if(fb){ fb.textContent="✗ 아쉬워요. 다시 입력해 보세요."; fb.className="gd-fb bad"; } }
+  } else { GD.ok=false; const fb=$("#gdFb"); if(fb){fb.textContent="✗ 아쉬워요. 다시 입력해 보세요."; fb.className="gd-fb bad";} }
 }
-function gdReveal(){ GD.msg=GD.cut<=0?"":("정답: "+gdNeed().join(" , ")); GD.ok=null; gdStep(); gdRender(); }
+function gdReveal(){ GD.msg=(GD.phase==="line"&&GD.cut===0)?"":("정답: "+gdNeed().join(" , ")); GD.ok=null; gdStep(); gdRender(); }
 // ---------- 문항 상세 ----------
 function showQ(id,skip){
   MODE="study"; const q=byId[id]; if(!q) return; CUR=id; curAns=q.a;
@@ -194,7 +231,7 @@ function showQ(id,skip){
    <div class="ans drill" id="drillBox"></div>
    <div class="sect">🗓️ 출제 회차 (${q.ses.length}회)</div><div class="note">${esc(q.ses.join(" · "))}</div>
    <div class="note" style="margin-top:16px">※ 핵심어(<b style="color:var(--hl)">빨강</b>)는 채점 시 반드시 들어가야 하는 단어입니다.</div>`;
-  gdInit(curAns,"#drillBox");
+  gdInit(curAns,"#drillBox",q.q);
   try{window.scrollTo(0,0);}catch(e){}
   if(window.innerWidth<=860) nav.classList.remove('open');
 }
@@ -265,7 +302,7 @@ function drillCard(){
      <button class="btn ghost" onclick="showQ('${q.id}')">상세 보기</button>
      <button class="btn" onclick="drillNext()">${dq.i+1>=dq.pool.length?'끝':'다음 →'}</button>
    </div></div>`;
-  gdInit(dq.pool[dq.i].a,"#drillBox2");
+  gdInit(dq.pool[dq.i].a,"#drillBox2",dq.pool[dq.i].q);
 }
 function setGauge2(g){ const b=$("#drillBox2"); if(b)b.innerHTML=renderDrill(dq.pool[dq.i].a,+g); const v=$("#gv2"); if(v)v.textContent=g; const r=$("#gauge2"); if(r&&+r.value!==+g)r.value=g; }
 function drillNext(){ if(dq.i+1>=dq.pool.length){drillSetup();return;} dq.i++; drillCard(); }
