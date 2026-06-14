@@ -190,4 +190,43 @@ function drillSetup(skip){
 function drillStart(){
   const scope=$("#d-scope").value, g=+$("#d-g").value, shuf=$("#d-shuf").checked;
   let pool=Q.slice();
-  if(scope.startsWith("area:")) pool=pool.filter(q=>q.sub[0]===scope.slice
+  if(scope.startsWith("area:")) pool=pool.filter(q=>q.sub[0]===scope.slice(5));
+  else if(scope.startsWith("sub:")) pool=pool.filter(q=>q.sub===scope.slice(4));
+  pool.sort((a,b)=>a.rank-b.rank);
+  if(shuf) for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+  if(!pool.length){alert("문항이 없습니다.");return;}
+  dq={pool,i:0,g}; drillCard();
+}
+function drillCard(){
+  const q=dq.pool[dq.i];
+  main.innerHTML=`<div class="ox-wrap">
+   <div class="ox-prog"><span>${dq.i+1} / ${dq.pool.length} · ${esc(q.st)}</span><span>${q.rank}위</span></div>
+   <div class="ox-bar"><i style="width:${(dq.i)/dq.pool.length*100}%"></i></div>
+   <div class="crumb">${esc(q.area)} › ${esc(q.st)}</div>
+   <h1 style="font-size:18px;border-left:5px solid var(--accent);padding-left:12px">${esc(q.q)}</h1>
+   ${q.cs? ('<div class="qbox" style="margin-top:8px">'+esc(q.cs).replace(/\n/g,'<br>')+'</div>') : ''}
+   <div class="sect">📝 답안 빈칸 <span class="dnote">가리기 <span id="gv2">${dq.g}</span>% · 빈칸 클릭 = 정답</span></div>
+   <div class="drill-ctl">
+     <button class="db" onclick="setGauge2(0)">전체 보기</button>
+     <input type="range" id="gauge2" min="0" max="100" value="${dq.g}" step="5" oninput="setGauge2(this.value)">
+     <button class="db" onclick="setGauge2(100)">완성</button>
+   </div>
+   <div class="ans drill" id="drillBox2"></div>
+   <div style="display:flex;justify-content:space-between;margin-top:18px">
+     <button class="btn ghost" onclick="drillPrev()" ${dq.i===0?'disabled':''}>← 이전</button>
+     <button class="btn ghost" onclick="showQ('${q.id}')">상세 보기</button>
+     <button class="btn" onclick="drillNext()">${dq.i+1>=dq.pool.length?'끝':'다음 →'}</button>
+   </div></div>`;
+  setGauge2(dq.g);
+}
+function setGauge2(g){ const b=$("#drillBox2"); if(b)b.innerHTML=renderDrill(dq.pool[dq.i].a,+g); const v=$("#gv2"); if(v)v.textContent=g; const r=$("#gauge2"); if(r&&+r.value!==+g)r.value=g; }
+function drillNext(){ if(dq.i+1>=dq.pool.length){drillSetup();return;} dq.i++; drillCard(); }
+function drillPrev(){ if(dq.i>0){dq.i--; drillCard();} }
+// ---------- 라우팅 ----------
+function setMenu(v){ $("#m-study").classList.toggle("on",v==='study'); $("#m-drill").classList.toggle("on",v==='drill'); }
+function view(v){ MODE=v; setMenu(v); if(v==='drill') drillSetup(); else { if(CUR)showQ(CUR); else homeStudy(); } }
+$("#q").addEventListener("keydown",e=>{ if(e.key==='Enter')doSearch(); });
+function pushIf(skip,state,hash){ try{ if(skip) history.replaceState(state,'',hash); else history.pushState(state,'',hash); }catch(e){} }
+window.addEventListener('popstate',e=>{ const s=e.state; if(!s) return homeStudy(true); if(s.t==='q')showQ(s.id,true); else if(s.t==='ov')showOverview(s.sub,true); else if(s.t==='drill')drillSetup(true); else homeStudy(true); });
+buildNav();
+(function(){ var h=decodeURIComponent((location.hash||'').replace(/^#/,'')); if(h.indexOf('ov:')===0&&D.ov&&D.ov[h.slice(3)])return showOverview(h.slice(3),true); if(/^Q\d+$/.test(h)&&byId[h])return showQ(h,true); if(h==='drill')return drillSetup(true); homeStudy(true); })();
