@@ -108,7 +108,7 @@ function renderDrill(text,g){
 function updateDrill(g){ const b=$("#drillBox"); if(b){b.innerHTML=renderDrill(curAns,+g);} const gv=$("#gv"); if(gv)gv.textContent=g; const r=$("#gauge"); if(r&&+r.value!==+g)r.value=g; }
 function setGauge(g){ updateDrill(g); }
 // ---------- 서술형 키워드 타이핑 게임 (한 줄씩) ----------
-let GD={lines:[],li:0,cut:1,box:"",text:"",done:false,msg:"",ok:null};
+let GD={lines:[],li:0,cut:0,box:"",text:"",done:false,msg:"",ok:null,intro:true};
 function gdParse(text){
   return text.split("\n").map(line=>{
     const segs=[],chunks=[];
@@ -124,41 +124,49 @@ function gdParse(text){
 }
 function gdNorm(s){ return (s||"").replace(/[\s·,.\/()\[\]:;'"]/g,"").toLowerCase(); }
 function gdNextLine(from){ for(let i=from;i<GD.lines.length;i++) if(GD.lines[i].drillable) return i; return -1; }
-function gdInit(text,box){ GD.text=text; GD.box=box; GD.lines=gdParse(text); GD.done=false; GD.msg=""; GD.ok=null; GD.cut=1; GD.li=gdNextLine(0); if(GD.li<0)GD.li=0; gdRender(); }
+function gdInit(text,box){ GD.text=text; GD.box=box; GD.lines=gdParse(text); GD.done=false; GD.intro=true; GD.msg=""; GD.ok=null; GD.cut=0; GD.li=gdNextLine(0); if(GD.li<0)GD.li=0; gdRender(); }
 function gdRestart(){ gdInit(GD.text,GD.box); }
-function gdLineHTML(line,cut){ return line.segs.map(s=>{ if(s.t==="fix") return esc(s.w); if(cut>=0&&s.bi<cut) return '<span class="gd-blank">(&nbsp;&nbsp;&nbsp;)</span>'; return '<b>'+esc(s.w)+'</b>'; }).join(""); }
-function gdNeed(){ return GD.lines[GD.li].chunks.slice(0,GD.cut); }
+function gdBegin(){ GD.intro=false; GD.cut=0; GD.msg=""; GD.ok=null; gdRender(); }
+function gdLineFull(line){ return line.segs.map(s=>s.t==="fix"?esc(s.w):'<b>'+esc(s.w)+'</b>').join(""); }
+function gdLineHTML(line,cut){ return line.segs.map(s=>{ if(s.t==="fix") return esc(s.w); if(cut>=1&&s.bi<cut) return '<span class="gd-blank">(&nbsp;&nbsp;&nbsp;)</span>'; return '<b>'+esc(s.w)+'</b>'; }).join(""); }
+function gdNeed(){ const c=GD.lines[GD.li].chunks; return GD.cut<=0? c.slice() : c.slice(0,GD.cut); }
 function gdRender(){
   const b=$(GD.box); if(!b) return;
-  const total=GD.lines.filter(l=>l.drillable).length;
-  const doneN=GD.lines.slice(0,GD.li).filter(l=>l.drillable).length;
-  let h="";
+  let body="";
   GD.lines.forEach((line,i)=>{
-    if(!line.segs.length){ h+='<div class="ln"></div>'; return; }
-    if(GD.done||!line.drillable||i!==GD.li){ h+=`<div class="ln${line.head?' h':''}">${gdLineHTML(line,-1)}</div>`; return; }
-    h+=`<div class="ln cur">${gdLineHTML(line,GD.cut)}</div>`;
+    if(!line.segs.length){ body+='<div class="ln"></div>'; return; }
+    if(GD.intro||GD.done||!line.drillable||i!==GD.li){ body+=`<div class="ln${line.head?' h':''}">${gdLineFull(line)}</div>`; return; }
+    body+=`<div class="ln cur">${gdLineHTML(line,GD.cut)}</div>`;
   });
-  if(!GD.done){
+  let ctl="";
+  if(GD.intro){
+    ctl=`<div class="gd-ctl"><span class="ld-prog">먼저 문제와 답 전체를 천천히 읽어 보세요.</span><button class="btn" onclick="gdBegin()">암기 시작 ▶</button></div>`;
+  } else if(GD.done){
+    ctl=`<div class="ld-final">🎉 이 답안의 핵심어를 모두 맞혔습니다! <button class="db" onclick="gdRestart()">다시 하기</button></div>`;
+  } else {
     const N=GD.lines[GD.li].chunks.length;
-    h+=`<div class="gd-ctl"><span class="ld-prog">줄 ${doneN+1}/${total} · 키워드 칸 ${GD.cut}/${N}</span>`
-      +`<input type="text" id="gdInput" class="gd-input" placeholder="빈칸의 단어를 입력 (여러 개면 띄어쓰기/쉼표)" autocomplete="off">`
+    const prog=GD.cut<=0? "이 줄을 보고 그대로 한 번 입력" : `빈칸 ${GD.cut}/${N}`;
+    const ph=GD.cut<=0? "이 줄의 키워드를 그대로 입력해 보세요" : "빈칸의 단어 입력 (여러 개면 띄어쓰기/쉼표)";
+    ctl=`<div class="gd-ctl"><span class="ld-prog">${prog}</span>`
+      +`<input type="text" id="gdInput" class="gd-input" placeholder="${ph}" autocomplete="off">`
       +`<button class="btn" onclick="gdCheck()">확인</button>`
-      +`<button class="db" onclick="gdReveal()">정답 보기</button></div>`
-      +`<div class="gd-fb${GD.ok===false?' bad':(GD.ok?' good':'')}" id="gdFb">${esc(GD.msg)}</div>`;
-  } else h+=`<div class="ld-final">🎉 이 답안의 핵심어를 모두 맞혔습니다! <button class="db" onclick="gdRestart()">다시 하기</button></div>`;
-  b.innerHTML=h;
+      +`<button class="db" onclick="gdReveal()">${GD.cut<=0?"건너뛰기":"정답 보기"}</button></div>`
+      +`<div class="gd-fb${GD.ok===false?" bad":(GD.ok?" good":"")}" id="gdFb">${esc(GD.msg)}</div>`;
+  }
+  b.innerHTML=body+ctl;
   const inp=$("#gdInput"); if(inp){ try{inp.focus();}catch(e){} inp.onkeydown=function(e){ if(e.key==="Enter")gdCheck(); }; }
 }
-function gdStep(){ const line=GD.lines[GD.li]; if(GD.cut<line.chunks.length){GD.cut++;} else {const nx=gdNextLine(GD.li+1); if(nx<0)GD.done=true; else {GD.li=nx;GD.cut=1;}} }
+function gdStep(){ const N=GD.lines[GD.li].chunks.length; if(GD.cut<N){GD.cut++;} else {const nx=gdNextLine(GD.li+1); if(nx<0)GD.done=true; else {GD.li=nx;GD.cut=0;}} }
 function gdCheck(){
   const inp=$("#gdInput"); if(!inp) return;
-  const need=gdNeed(), got=gdNorm(inp.value);
+  const need=gdNeed(), got=gdNorm(inp.value), wasT=GD.cut<=0, last=GD.cut>=GD.lines[GD.li].chunks.length;
   if(got && need.every(c=>got.includes(gdNorm(c)))){
-    const last=GD.cut>=GD.lines[GD.li].chunks.length; gdStep(); GD.ok=true;
-    GD.msg=GD.done?"":(last?"✓ 이 줄 완성! 다음 줄로.":"✓ 정답! 다음 칸을 채워 보세요."); gdRender();
-  } else { GD.ok=false; const fb=$("#gdFb"); if(fb){ fb.textContent="✗ 아쉬워요. 빈칸의 단어를 다시 입력해 보세요."; fb.className="gd-fb bad"; } }
+    gdStep(); GD.ok=true;
+    GD.msg=GD.done?"":(wasT?"✓ 좋아요! 이제 빈칸을 하나씩 채워 보세요.":(last?"✓ 이 줄 완성! 다음 줄로.":"✓ 정답! 다음 칸을 채워 보세요."));
+    gdRender();
+  } else { GD.ok=false; const fb=$("#gdFb"); if(fb){ fb.textContent="✗ 아쉬워요. 다시 입력해 보세요."; fb.className="gd-fb bad"; } }
 }
-function gdReveal(){ GD.msg="정답: "+gdNeed().join(" , "); GD.ok=null; gdStep(); gdRender(); }
+function gdReveal(){ GD.msg=GD.cut<=0?"":("정답: "+gdNeed().join(" , ")); GD.ok=null; gdStep(); gdRender(); }
 // ---------- 문항 상세 ----------
 function showQ(id,skip){
   MODE="study"; const q=byId[id]; if(!q) return; CUR=id; curAns=q.a;
